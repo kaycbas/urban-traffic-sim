@@ -173,6 +173,23 @@
             border-radius: 4px;
             font-size: 0.9em;
         }
+        
+        .size-note {
+            font-size: 0.8em;
+            color: #666;
+            margin-top: -5px;
+            margin-bottom: 15px;
+            font-style: italic;
+        }
+        
+        #distance-value {
+            display: inline-block;
+            width: 100%;
+            text-align: center;
+            font-weight: normal;
+            color: #3498db;
+            margin-top: 5px;
+        }
     </style>
 </head>
 <body>
@@ -212,8 +229,10 @@
                 
                 <div class="form-group">
                     <label for="distance">Network Size (meters)</label>
-                    <input type="number" id="distance" min="500" max="5000" value="1000">
+                    <input type="range" id="distance" min="200" max="1000" step="100" value="500">
+                    <span id="distance-value">500 meters</span>
                 </div>
+                <p class="size-note">Note: Smaller values (200-500m) load faster and align better with the map</p>
                 
                 <button id="load-network-btn">Load Network</button>
                 
@@ -242,16 +261,16 @@
                 <div class="legend">
                     <h4>Traffic Volume</h4>
                     <div class="legend-item">
-                        <div class="color-box" style="background-color: #1a9641;"></div>
-                        <span>Low</span>
+                        <div class="color-box" style="background-color: #4daf4a;"></div>
+                        <span>Low (< 200)</span>
                     </div>
                     <div class="legend-item">
-                        <div class="color-box" style="background-color: #ffffbf;"></div>
-                        <span>Medium</span>
+                        <div class="color-box" style="background-color: #ff7f00;"></div>
+                        <span>Medium (200-500)</span>
                     </div>
                     <div class="legend-item">
-                        <div class="color-box" style="background-color: #d7191c;"></div>
-                        <span>High</span>
+                        <div class="color-box" style="background-color: #e41a1c;"></div>
+                        <span>High (> 500)</span>
                     </div>
                 </div>
                 
@@ -272,11 +291,17 @@
         const latInput = document.getElementById('latitude');
         const lngInput = document.getElementById('longitude');
         const distanceInput = document.getElementById('distance');
+        const distanceValue = document.getElementById('distance-value');
         const loadNetworkBtn = document.getElementById('load-network-btn');
         const resetNetworkBtn = document.getElementById('reset-network-btn');
         const statusMessage = document.getElementById('status-message');
         const statusIndicator = document.getElementById('status-indicator');
         const loadingIndicator = document.getElementById('loading-indicator');
+        
+        // Update distance value display when slider changes
+        distanceInput.addEventListener('input', function() {
+            distanceValue.textContent = `${this.value} meters`;
+        });
         
         // Location presets
         const locations = {
@@ -440,20 +465,22 @@
                         
                         return {
                             color: color,
-                            weight: feature.properties.width || 2,
-                            opacity: 0.8
+                            weight: feature.properties.width || 3,
+                            opacity: 0.85,
+                            lineCap: 'round',
+                            lineJoin: 'round'
                         };
                     }
                 },
                 pointToLayer: function(feature, latlng) {
-                    // Display intersection nodes as small circles
+                    // Display intersection nodes as very small circles
                     return L.circleMarker(latlng, {
-                        radius: 2,
+                        radius: 1.5,
                         fillColor: '#333',
                         color: '#000',
-                        weight: 1,
-                        opacity: 0.5,
-                        fillOpacity: 0.5
+                        weight: 0.5,
+                        opacity: 0.4,
+                        fillOpacity: 0.4
                     });
                 },
                 onEachFeature: function(feature, layer) {
@@ -488,13 +515,14 @@
         
         // Helper functions
         function getTrafficColor(traffic) {
-            // Generate color based on traffic level (green -> yellow -> red)
+            // Generate color based on traffic level (green -> orange -> red)
+            // Using a more road-appropriate color scheme
             if (traffic < 200) {
-                return '#1a9641'; // Green
+                return '#4daf4a'; // Green/teal
             } else if (traffic < 500) {
-                return '#ffffbf'; // Yellow
+                return '#ff7f00'; // Orange
             } else {
-                return '#d7191c'; // Red
+                return '#e41a1c'; // Red
             }
         }
         

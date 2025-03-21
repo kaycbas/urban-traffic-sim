@@ -41,17 +41,16 @@ def load_network():
         print(f"Downloading OSM network for location: ({lat}, {lng}), dist={dist}m")
         G = ox.graph_from_point((lat, lng), dist=dist, network_type='drive')
         
+        # Store original lat/lng before projection
+        for node_id, data in G.nodes(data=True):
+            G.nodes[node_id]['lon'] = data['x']
+            G.nodes[node_id]['lat'] = data['y']
+            
         # Ensure the graph is projected to a useful CRS for accurate geometry
         G = ox.project_graph(G)
         
         # Convert MultiDiGraph to DiGraph to simplify
         G = nx.DiGraph(G)
-        
-        # Convert nodes to a simpler format - we'll keep longitude and latitude as x, y
-        for node_id, data in G.nodes(data=True):
-            # Store the x, y coordinates from the 'x' and 'y' attributes
-            G.nodes[node_id]['x'] = data['x']
-            G.nodes[node_id]['y'] = data['y']
         
         # Make a copy for modifications
         G_modified = G.copy()
@@ -62,6 +61,7 @@ def load_network():
         # Create a GeoJSON representation of the network with traffic
         network_geojson = create_network_geojson(G, edge_traffic)
         
+        # Note: Leaflet expects [lat, lng] for setView
         return jsonify({
             'success': True,
             'center': [lat, lng],
@@ -221,15 +221,29 @@ def create_network_geojson(graph, traffic_data):
             # Use the existing LineString geometry
             coords = []
             if hasattr(data['geometry'], 'coords'):
-                coords = list(data['geometry'].coords)
+                # Convert projected coordinates back to lat/lng for GeoJSON
+                if 'crs' in data and data['crs'] == 'EPSG:4326':
+                    # These are already lat/lng coordinates
+                    coords = list(data['geometry'].coords)
+                else:
+                    # Get nodes' lat/lng from the original graph - this is needed because
+                    # we've projected the graph and the x,y are no longer lat/lng
+                    coords = [(graph.nodes[u].get('lon', graph.nodes[u]['x']), 
+                              graph.nodes[u].get('lat', graph.nodes[u]['y'])), 
+                             (graph.nodes[v].get('lon', graph.nodes[v]['x']), 
+                              graph.nodes[v].get('lat', graph.nodes[v]['y']))]
             else:
-                # Fallback to simplified geometry
-                coords = [(graph.nodes[u]['x'], graph.nodes[u]['y']), 
-                         (graph.nodes[v]['x'], graph.nodes[v]['y'])]
+                # Fallback to node lat/lng coords 
+                coords = [(graph.nodes[u].get('lon', graph.nodes[u]['x']), 
+                          graph.nodes[u].get('lat', graph.nodes[u]['y'])), 
+                         (graph.nodes[v].get('lon', graph.nodes[v]['x']), 
+                          graph.nodes[v].get('lat', graph.nodes[v]['y']))]
         else:
-            # Create a straight line from node to node
-            coords = [(graph.nodes[u]['x'], graph.nodes[u]['y']), 
-                     (graph.nodes[v]['x'], graph.nodes[v]['y'])]
+            # Create a straight line from node to node using lat/lng coords
+            coords = [(graph.nodes[u].get('lon', graph.nodes[u]['x']), 
+                      graph.nodes[u].get('lat', graph.nodes[u]['y'])), 
+                     (graph.nodes[v].get('lon', graph.nodes[v]['x']), 
+                      graph.nodes[v].get('lat', graph.nodes[v]['y']))]
         
         # Get road name if available
         name = "Unnamed Road"
@@ -244,11 +258,12 @@ def create_network_geojson(graph, traffic_data):
             highway = data['highway']
         
         # Create GeoJSON Feature
+        # Note: GeoJSON format expects [lon, lat] order for coordinates
         feature = {
             'type': 'Feature',
             'geometry': {
                 'type': 'LineString',
-                'coordinates': [[c[0], c[1]] for c in coords]
+                'coordinates': [[c[0], c[1]] for c in coords]  # already in [lon, lat] format
             },
             'properties': {
                 'u': u,
@@ -267,11 +282,16 @@ def create_network_geojson(graph, traffic_data):
     node_count = len(graph.nodes())
     if node_count <= 1000:  # Only add nodes if there aren't too many
         for node_id, data in graph.nodes(data=True):
+            # Get longitude and latitude from the node data
+            # OSMnx stores original coordinates as 'lon', 'lat' and projected as 'x', 'y'
+            lon = data.get('lon', data.get('x'))
+            lat = data.get('lat', data.get('y'))
+            
             feature = {
                 'type': 'Feature',
                 'geometry': {
                     'type': 'Point',
-                    'coordinates': [data['x'], data['y']]
+                    'coordinates': [lon, lat]
                 },
                 'properties': {
                     'id': node_id,

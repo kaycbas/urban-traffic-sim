@@ -360,8 +360,8 @@
             .then(response => response.json())
             .then(data => {
                 if (data.success) {
-                    // Center the map
-                    map.setView(data.center.reverse(), 15);
+                    // Center the map - create a new array to avoid modifying the original
+                    map.setView([data.center[0], data.center[1]], 15);
                     
                     // Display the network
                     displayNetwork(data.network);

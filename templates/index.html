@@ -1,0 +1,521 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Urban Traffic Simulator</title>
+    
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.3/dist/leaflet.css" />
+    
+    <style>
+        html, body {
+            height: 100%;
+            margin: 0;
+            padding: 0;
+            font-family: Arial, sans-serif;
+        }
+        
+        .container {
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+        }
+        
+        .header {
+            background-color: #2c3e50;
+            color: white;
+            padding: 10px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .header h1 {
+            margin: 0;
+            font-size: 24px;
+        }
+        
+        .content {
+            display: flex;
+            flex: 1;
+            overflow: hidden;
+        }
+        
+        .sidebar {
+            width: 300px;
+            background-color: #f5f5f5;
+            padding: 20px;
+            overflow-y: auto;
+            box-shadow: 2px 0 5px rgba(0,0,0,0.1);
+        }
+        
+        #map-container {
+            flex: 1;
+            position: relative;
+        }
+        
+        #map {
+            height: 100%;
+        }
+        
+        .form-group {
+            margin-bottom: 15px;
+        }
+        
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        
+        input, button, select {
+            width: 100%;
+            padding: 8px;
+            box-sizing: border-box;
+            margin-bottom: 10px;
+        }
+        
+        button {
+            background-color: #3498db;
+            color: white;
+            border: none;
+            cursor: pointer;
+            font-weight: bold;
+        }
+        
+        button:hover {
+            background-color: #2980b9;
+        }
+        
+        button:disabled {
+            background-color: #95a5a6;
+            cursor: not-allowed;
+        }
+        
+        .control-panel {
+            margin-top: 20px;
+            padding-top: 20px;
+            border-top: 1px solid #ddd;
+        }
+        
+        .legend {
+            position: absolute;
+            bottom: 30px;
+            right: 10px;
+            z-index: 1000;
+            background: white;
+            padding: 10px;
+            border-radius: 5px;
+            box-shadow: 0 0 15px rgba(0,0,0,0.2);
+        }
+        
+        .legend-item {
+            margin-bottom: 5px;
+        }
+        
+        .color-box {
+            display: inline-block;
+            width: 20px;
+            height: 10px;
+            margin-right: 5px;
+        }
+        
+        .loading {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(255,255,255,0.8);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 1001;
+            display: none;
+        }
+        
+        .spinner {
+            border: 5px solid #f3f3f3;
+            border-top: 5px solid #3498db;
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            animation: spin 1s linear infinite;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .status {
+            padding: 10px;
+            margin-top: 10px;
+            border-radius: 4px;
+            display: none;
+        }
+        
+        .error {
+            background-color: #f8d7da;
+            color: #721c24;
+        }
+        
+        .success {
+            background-color: #d4edda;
+            color: #155724;
+        }
+        
+        .instructions {
+            margin-top: 20px;
+            padding: 10px;
+            background-color: #f8f9fa;
+            border-radius: 4px;
+            font-size: 0.9em;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Urban Traffic Simulator</h1>
+            <div>
+                <span id="status-indicator">Ready</span>
+            </div>
+        </div>
+        
+        <div class="content">
+            <div class="sidebar">
+                <h2>Network Settings</h2>
+                
+                <div class="form-group">
+                    <label for="location">Location (Preset)</label>
+                    <select id="location-preset">
+                        <option value="jakarta">Jakarta, Indonesia</option>
+                        <option value="newyork">New York, USA</option>
+                        <option value="london">London, UK</option>
+                        <option value="custom">Custom Location</option>
+                    </select>
+                </div>
+                
+                <div id="custom-location" style="display: none;">
+                    <div class="form-group">
+                        <label for="latitude">Latitude</label>
+                        <input type="number" id="latitude" step="0.0001" value="-6.2088">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="longitude">Longitude</label>
+                        <input type="number" id="longitude" step="0.0001" value="106.8456">
+                    </div>
+                </div>
+                
+                <div class="form-group">
+                    <label for="distance">Network Size (meters)</label>
+                    <input type="number" id="distance" min="500" max="5000" value="1000">
+                </div>
+                
+                <button id="load-network-btn">Load Network</button>
+                
+                <div class="status" id="status-message"></div>
+                
+                <div class="control-panel">
+                    <h2>Traffic Controls</h2>
+                    
+                    <div class="instructions">
+                        <p><strong>How to use:</strong></p>
+                        <ol>
+                            <li>Click "Load Network" to get a street network</li>
+                            <li>Click on a road segment to simulate closing it</li>
+                            <li>See traffic redistributed on the map</li>
+                            <li>Click "Reset Network" to undo all changes</li>
+                        </ol>
+                    </div>
+                    
+                    <button id="reset-network-btn" disabled>Reset Network</button>
+                </div>
+            </div>
+            
+            <div id="map-container">
+                <div id="map"></div>
+                
+                <div class="legend">
+                    <h4>Traffic Volume</h4>
+                    <div class="legend-item">
+                        <div class="color-box" style="background-color: #1a9641;"></div>
+                        <span>Low</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="color-box" style="background-color: #ffffbf;"></div>
+                        <span>Medium</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="color-box" style="background-color: #d7191c;"></div>
+                        <span>High</span>
+                    </div>
+                </div>
+                
+                <div class="loading" id="loading-indicator">
+                    <div class="spinner"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Leaflet JS -->
+    <script src="https://unpkg.com/leaflet@1.9.3/dist/leaflet.js"></script>
+    
+    <script>
+        // DOM elements
+        const locationPreset = document.getElementById('location-preset');
+        const customLocationDiv = document.getElementById('custom-location');
+        const latInput = document.getElementById('latitude');
+        const lngInput = document.getElementById('longitude');
+        const distanceInput = document.getElementById('distance');
+        const loadNetworkBtn = document.getElementById('load-network-btn');
+        const resetNetworkBtn = document.getElementById('reset-network-btn');
+        const statusMessage = document.getElementById('status-message');
+        const statusIndicator = document.getElementById('status-indicator');
+        const loadingIndicator = document.getElementById('loading-indicator');
+        
+        // Location presets
+        const locations = {
+            jakarta: { lat: -6.2088, lng: 106.8456 },
+            newyork: { lat: 40.7128, lng: -74.0060 },
+            london: { lat: 51.5074, lng: -0.1278 }
+        };
+        
+        // Map initialization
+        let map = L.map('map').setView([locations.jakarta.lat, locations.jakarta.lng], 15);
+        
+        // Add the base map tiles
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+            maxZoom: 19
+        }).addTo(map);
+        
+        // Network data
+        let networkLayer = null;
+        let selectedEdge = null;
+        
+        // Event listeners
+        locationPreset.addEventListener('change', function() {
+            if (this.value === 'custom') {
+                customLocationDiv.style.display = 'block';
+            } else {
+                customLocationDiv.style.display = 'none';
+                if (locations[this.value]) {
+                    latInput.value = locations[this.value].lat;
+                    lngInput.value = locations[this.value].lng;
+                }
+            }
+        });
+        
+        loadNetworkBtn.addEventListener('click', loadNetwork);
+        resetNetworkBtn.addEventListener('click', resetNetwork);
+        
+        // Load a network from the server
+        function loadNetwork() {
+            showLoading(true);
+            updateStatus('Loading network...', 'neutral');
+            
+            const requestData = {
+                latitude: parseFloat(latInput.value),
+                longitude: parseFloat(lngInput.value),
+                distance: parseInt(distanceInput.value)
+            };
+            
+            fetch('/load_network', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(requestData)
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    // Center the map
+                    map.setView(data.center.reverse(), 15);
+                    
+                    // Display the network
+                    displayNetwork(data.network);
+                    
+                    resetNetworkBtn.disabled = false;
+                    updateStatus('Network loaded successfully!', 'success');
+                } else {
+                    updateStatus('Error: ' + data.error, 'error');
+                }
+            })
+            .catch(error => {
+                updateStatus('Error: ' + error.message, 'error');
+            })
+            .finally(() => {
+                showLoading(false);
+            });
+        }
+        
+        // Close a road and simulate traffic redistribution
+        function closeRoad(edge) {
+            if (!edge) return;
+            
+            showLoading(true);
+            updateStatus('Simulating road closure...', 'neutral');
+            
+            const requestData = {
+                node_from: edge.u,
+                node_to: edge.v,
+                key: edge.key
+            };
+            
+            fetch('/close_road', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(requestData)
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    // Display the network
+                    displayNetwork(data.network);
+                    updateStatus('Road closed. Traffic has been redistributed.', 'success');
+                } else {
+                    updateStatus('Error: ' + data.error, 'error');
+                }
+            })
+            .catch(error => {
+                updateStatus('Error: ' + error.message, 'error');
+            })
+            .finally(() => {
+                showLoading(false);
+            });
+        }
+        
+        // Reset the network to its original state
+        function resetNetwork() {
+            showLoading(true);
+            updateStatus('Resetting network...', 'neutral');
+            
+            fetch('/reset_network', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({})
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    // Display the network
+                    displayNetwork(data.network);
+                    updateStatus('Network reset to original state.', 'success');
+                } else {
+                    updateStatus('Error: ' + data.error, 'error');
+                }
+            })
+            .catch(error => {
+                updateStatus('Error: ' + error.message, 'error');
+            })
+            .finally(() => {
+                showLoading(false);
+            });
+        }
+        
+        // Display a network on the map
+        function displayNetwork(networkData) {
+            // Remove existing network
+            if (networkLayer) {
+                map.removeLayer(networkLayer);
+            }
+            
+            // Create a new layer
+            networkLayer = L.geoJSON(networkData, {
+                style: function(feature) {
+                    if (feature.geometry.type === 'LineString') {
+                        // Scale color based on traffic (green to red)
+                        const traffic = feature.properties.traffic;
+                        const color = getTrafficColor(traffic);
+                        
+                        return {
+                            color: color,
+                            weight: feature.properties.width || 2,
+                            opacity: 0.8
+                        };
+                    }
+                },
+                pointToLayer: function(feature, latlng) {
+                    // Display intersection nodes as small circles
+                    return L.circleMarker(latlng, {
+                        radius: 2,
+                        fillColor: '#333',
+                        color: '#000',
+                        weight: 1,
+                        opacity: 0.5,
+                        fillOpacity: 0.5
+                    });
+                },
+                onEachFeature: function(feature, layer) {
+                    // Add click event to edges
+                    if (feature.geometry.type === 'LineString') {
+                        layer.on('click', function() {
+                            selectedEdge = {
+                                u: feature.properties.u,
+                                v: feature.properties.v,
+                                key: feature.properties.key
+                            };
+                            
+                            // Ask for confirmation
+                            if (confirm('Close this road segment and simulate traffic redistribution?')) {
+                                closeRoad(selectedEdge);
+                            }
+                        });
+                        
+                        // Add tooltips
+                        const name = feature.properties.name || 'Unnamed road';
+                        const traffic = feature.properties.traffic;
+                        layer.bindTooltip(`${name}<br>Traffic: ${traffic} vehicles`);
+                    }
+                }
+            }).addTo(map);
+            
+            // Fit the map to the network bounds
+            if (networkLayer.getBounds().isValid()) {
+                map.fitBounds(networkLayer.getBounds());
+            }
+        }
+        
+        // Helper functions
+        function getTrafficColor(traffic) {
+            // Generate color based on traffic level (green -> yellow -> red)
+            if (traffic < 200) {
+                return '#1a9641'; // Green
+            } else if (traffic < 500) {
+                return '#ffffbf'; // Yellow
+            } else {
+                return '#d7191c'; // Red
+            }
+        }
+        
+        function showLoading(show) {
+            loadingIndicator.style.display = show ? 'flex' : 'none';
+            statusIndicator.textContent = show ? 'Working...' : 'Ready';
+        }
+        
+        function updateStatus(message, type) {
+            statusMessage.textContent = message;
+            statusMessage.style.display = 'block';
+            
+            // Reset classes
+            statusMessage.classList.remove('error', 'success');
+            
+            if (type === 'error') {
+                statusMessage.classList.add('error');
+            } else if (type === 'success') {
+                statusMessage.classList.add('success');
+            }
+        }
+    </script>
+</body>
+</html>

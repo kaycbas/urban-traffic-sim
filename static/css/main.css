@@ -1,0 +1,53 @@
+/* This file contains additional styles for the application */
+/* Currently, most styles are defined inline in the HTML template */
+
+.tooltip-custom {
+    background-color: white;
+    border: 1px solid #ccc;
+    padding: 5px;
+    border-radius: 3px;
+    box-shadow: 0 0 10px rgba(0,0,0,0.1);
+}
+
+/* Additional styles for potential future enhancements */
+.info-panel {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    background: white;
+    padding: 15px;
+    border-radius: 5px;
+    box-shadow: 0 0 15px rgba(0,0,0,0.2);
+    max-width: 300px;
+    z-index: 1000;
+    display: none;
+}
+
+.info-panel h4 {
+    margin-top: 0;
+    margin-bottom: 10px;
+}
+
+.info-item {
+    margin-bottom: 5px;
+}
+
+.info-label {
+    font-weight: bold;
+}
+
+/* For mobile responsiveness */
+@media (max-width: 768px) {
+    .content {
+        flex-direction: column;
+    }
+    
+    .sidebar {
+        width: 100%;
+        box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+    }
+    
+    #map-container {
+        height: 70vh;
+    }
+}

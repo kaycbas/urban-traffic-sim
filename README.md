@@ -24,8 +24,8 @@ A web application that simulates traffic flow and road closures using real stree
 
 1. Clone this repository:
    ```
-   git clone https://github.com/yourusername/travel-model-mvp.git
-   cd travel-model-mvp
+   git clone https://github.com/kaycbas/urban-traffic-sim
+   cd urban-traffic-sim
    ```
 
 2. Create a virtual environment and activate it:

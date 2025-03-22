@@ -1,6 +1,4 @@
-# Building Your Own Urban Traffic Simulator
-
-This guide will walk you through creating a web application that visualizes traffic on real street networks and simulates the effects of road closures. Follow these step-by-step instructions to build your own version of this project.
+# Urban Traffic Simulator
 
 ## Project Overview
 
@@ -78,12 +76,30 @@ urban-traffic-simulator/
 
 ## Step 3: Creating the Flask Application
 
-Create `app.py` with the basic Flask setup:
+Create `app.py` to set up the basic Flask framework:
+
+1. **Import required libraries**:
+   - Flask for the web framework
+   - OSMnx for downloading street networks
+   - NetworkX for graph operations
+   - Additional utilities (json, random)
+
+2. **Initialize Flask app and configure settings**:
+   - Create a Flask app instance
+   - Configure OSMnx settings
+   - Set up global variables to store network data
+
+3. **Define the root route**:
+   - Create a route for the homepage (`/`) that renders your template
+
+4. **Setup the server to run the application**:
+   - Add the standard `if __name__ == '__main__':` block to run the app
+   - Configure it to run on port 5001
+
+Here's a starting point:
 
 ```python
 import os
-import json
-import random
 import networkx as nx
 import osmnx as ox
 from flask import Flask, render_template, request, jsonify
@@ -91,588 +107,191 @@ from flask import Flask, render_template, request, jsonify
 # Set up Flask app
 app = Flask(__name__)
 
-# Configure osmnx
-ox.config(use_cache=True, log_console=True)
-
 # Global variables to store network data
 G = None  # The original network
-G_modified = None  # The network with a road closure
+G_modified = None  # The network with road closures
 edge_traffic = {}  # Traffic volumes on edges
 
-# Default center coordinates (choose any city you like)
+# Default settings
 DEFAULT_CENTER = (-6.2088, 106.8456)  # Jakarta, Indonesia
-DEFAULT_DIST = 500  # meters - smaller area for OSM data to load quickly
+DEFAULT_DIST = 500  # meters
 
 @app.route('/')
 def index():
-    """Render the main page"""
     return render_template('index.html')
 
-# Start the Flask server when running the script directly
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5001)
 ```
 
 ## Step 4: Core Backend Functionality
 
-Now, you need to implement these key functions in your `app.py`:
-
-1. **Load Network Route**: Fetches street network from OpenStreetMap
-2. **Traffic Generation**: Creates synthetic traffic data
-3. **Road Closure**: Simulates closing roads and traffic redistribution
-4. **GeoJSON Conversion**: Formats network data for map display
-
-Here are the key functions you should implement:
+You'll need to implement these key components in the Flask application:
 
 ### 1. Load Network Route
 
-```python
-@app.route('/load_network', methods=['POST'])
-def load_network():
-    """Load a network from OpenStreetMap"""
-    data = request.json
-    
-    # Get location from request, or use default
-    lat = float(data.get('latitude', DEFAULT_CENTER[0]))
-    lng = float(data.get('longitude', DEFAULT_CENTER[1]))
-    dist = float(data.get('distance', DEFAULT_DIST))
-    
-    global G, G_modified, edge_traffic
-    try:
-        # Download street network from OSM for the specified location
-        print(f"Downloading OSM network for location: ({lat}, {lng}), dist={dist}m")
-        G = ox.graph_from_point((lat, lng), dist=dist, network_type='drive')
-        
-        # Store original lat/lng before projection - critical for map alignment!
-        for node_id, data in G.nodes(data=True):
-            G.nodes[node_id]['lon'] = data['x']  
-            G.nodes[node_id]['lat'] = data['y']
-            
-        # Project graph to a useful CRS for accurate geometry
-        G = ox.project_graph(G)
-        
-        # Create a copy for modifications
-        G_modified = G.copy()
-        
-        # Generate synthetic traffic
-        edge_traffic = generate_traffic(G)
-        
-        # Convert to GeoJSON
-        network_geojson = create_network_geojson(G, edge_traffic)
-        
-        return jsonify({
-            'success': True,
-            'center': [lat, lng],
-            'network': network_geojson
-        })
-    except Exception as e:
-        print(f"Error loading network: {e}")
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        })
-```
+Create a route `/load_network` that:
+- Accepts POST requests with location coordinates and network size
+- Uses OSMnx to download a street network for the specified location
+- Stores the original lat/lng coordinates before projection (critical for map alignment!)
+- Projects the graph for accurate geometry calculations
+- Generates synthetic traffic for the network
+- Converts the network to GeoJSON format for display on the map
+- Returns a JSON response with the network data
+
+Key considerations:
+- Make sure to store the original lat/lng coordinates before projection
+- Handle exceptions gracefully
+- Return appropriate success/error responses
 
 ### 2. Traffic Generation Function
 
-Implement a function to generate synthetic traffic:
+Create a `generate_traffic()` function that:
+- Takes a graph as input
+- Calculates betweenness centrality (with a limit on sample nodes for performance)
+- Assigns traffic values to each edge based on:
+  - Road classification (highways get more traffic)
+  - Road length (shorter segments might indicate denser areas)
+  - Centrality (roads that connect many parts of the network)
+  - Random variation to simulate real-world conditions
+- Returns a dictionary mapping edge tuples to traffic values
 
+Sample code snippet for calculating road factors:
 ```python
-def generate_traffic(graph):
-    """
-    Generate realistic traffic volumes based on:
-    1. Road classification (highways get more traffic)
-    2. Road length (shorter segments might have more traffic)
-    3. Betweenness centrality (roads that connect many parts of the city have more traffic)
-    """
-    # Initialize traffic dictionary
-    traffic = {}
-    
-    # Try to compute betweenness centrality (may be expensive)
-    try:
-        # Limit sample nodes to keep it fast
-        bc_edges = nx.edge_betweenness_centrality(graph, k=min(100, len(graph.nodes)), weight='length')
-    except:
-        # Fallback to a simpler model
-        bc_edges = {edge: 0.5 for edge in graph.edges()}
-    
-    # For each edge, assign traffic based on multiple factors
-    for u, v, data in graph.edges(data=True):
-        # Base traffic level - random between 50-200
-        base_traffic = random.randint(50, 200)
-        
-        # Road classification factor - highways get more traffic
-        road_factor = 1.0
-        if 'highway' in data:
-            highway_type = data['highway']
-            # Primary roads
-            if highway_type in ['motorway', 'trunk', 'primary', 'motorway_link', 'trunk_link', 'primary_link']:
-                road_factor = 3.0
-            # Secondary roads
-            elif highway_type in ['secondary', 'secondary_link', 'tertiary', 'tertiary_link']:
-                road_factor = 2.0
-                
-        # Calculate final traffic
-        edge_traffic = int(base_traffic * road_factor * random.uniform(0.8, 1.2))
-        traffic[(u, v, 0)] = max(10, min(1000, edge_traffic))
-    
-    return traffic
+# Sample of how you might determine traffic based on road type
+road_factor = 1.0
+if 'highway' in data:
+    highway_type = data['highway']
+    if highway_type in ['motorway', 'trunk', 'primary']:
+        road_factor = 3.0  # Primary roads get more traffic
+    elif highway_type in ['secondary', 'tertiary']:
+        road_factor = 2.0  # Secondary roads get medium traffic
 ```
 
 ### 3. GeoJSON Conversion Function
 
-```python
-def create_network_geojson(graph, traffic_data):
-    """Convert network to GeoJSON format with traffic data"""
-    features = []
-    
-    # Add edges as LineString features
-    for u, v, data in graph.edges(data=True):
-        # Create key 0 for all edges (simplified model)
-        k = 0
-        
-        # Get traffic for this edge
-        traffic = traffic_data.get((u, v, k), 0)
-        
-        # Calculate line width based on traffic
-        width = 1.5 + (traffic / 150)
-        
-        # Get coordinates for the edge
-        coords = [(graph.nodes[u].get('lon', graph.nodes[u]['x']), 
-                  graph.nodes[u].get('lat', graph.nodes[u]['y'])), 
-                 (graph.nodes[v].get('lon', graph.nodes[v]['x']), 
-                  graph.nodes[v].get('lat', graph.nodes[v]['y']))]
-        
-        # Create GeoJSON Feature
-        feature = {
-            'type': 'Feature',
-            'geometry': {
-                'type': 'LineString',
-                'coordinates': [[c[0], c[1]] for c in coords]  # [lon, lat] format
-            },
-            'properties': {
-                'u': u,
-                'v': v,
-                'key': k,
-                'name': data.get('name', 'Unnamed Road'),
-                'highway': data.get('highway', 'road'),
-                'traffic': traffic,
-                'width': width
-            }
-        }
-        features.append(feature)
-    
-    return {
-        'type': 'FeatureCollection',
-        'features': features
-    }
-```
+Create a `create_network_geojson()` function that:
+- Takes a graph and traffic data as input
+- Creates a GeoJSON FeatureCollection containing:
+  - Roads as LineString features
+  - (Optionally) Intersections as Point features
+- For each road segment, include properties like:
+  - Traffic volume
+  - Road name
+  - Road type
+  - Visual properties (width, color)
+- Ensure coordinates are in the correct format for GeoJSON (longitude, latitude)
+
+Remember: The most critical part of this function is ensuring coordinates are correctly handled. OSMnx projects the graph for calculations, but Leaflet needs original lat/lng coordinates.
+
+### 4. Road Closure and Traffic Redistribution
+
+For the road closure functionality, implement:
+
+1. **A route for handling road closures**:
+   - Accept POST requests with the edge to close
+   - Create a modified copy of the original graph
+   - Remove the selected edge
+   - Redistribute traffic
+   - Return GeoJSON of the modified network
+
+2. **A traffic redistribution function**:
+   - Find alternate routes between the endpoints of the closed road
+   - Distribute the traffic from the closed road to the alternate routes
+   - Handle cases where no alternate route exists
+
+3. **A reset function**:
+   - Restore the original network state
+   - Reset traffic to initial values
 
 ## Step 5: Frontend Implementation
 
-Create `templates/index.html` for the user interface:
+Create an HTML template (`templates/index.html`) with these components:
 
-```html
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Urban Traffic Simulator</title>
-    
-    <!-- Leaflet CSS -->
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.3/dist/leaflet.css" />
-    
-    <style>
-        html, body {
-            height: 100%;
-            margin: 0;
-            padding: 0;
-            font-family: Arial, sans-serif;
-        }
-        
-        .container {
-            display: flex;
-            flex-direction: column;
-            height: 100%;
-        }
-        
-        .header {
-            background-color: #2c3e50;
-            color: white;
-            padding: 10px 20px;
-        }
-        
-        .content {
-            display: flex;
-            flex: 1;
-            overflow: hidden;
-        }
-        
-        .sidebar {
-            width: 300px;
-            background-color: #f5f5f5;
-            padding: 20px;
-            overflow-y: auto;
-        }
-        
-        #map {
-            flex: 1;
-            height: 100%;
-        }
-        
-        .form-group {
-            margin-bottom: 15px;
-        }
-        
-        button {
-            background-color: #3498db;
-            color: white;
-            border: none;
-            padding: 8px 15px;
-            cursor: pointer;
-            width: 100%;
-            margin-top: 10px;
-        }
-        
-        /* Add more styling as needed */
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="header">
-            <h1>Urban Traffic Simulator</h1>
-        </div>
-        
-        <div class="content">
-            <div class="sidebar">
-                <h2>Network Settings</h2>
-                
-                <div class="form-group">
-                    <label for="location">Location</label>
-                    <select id="location-preset">
-                        <option value="custom">Custom Location</option>
-                        <option value="jakarta">Jakarta, Indonesia</option>
-                        <option value="newyork">New York, USA</option>
-                        <option value="london">London, UK</option>
-                    </select>
-                </div>
-                
-                <div id="custom-location">
-                    <div class="form-group">
-                        <label for="latitude">Latitude</label>
-                        <input type="number" id="latitude" step="0.0001" value="-6.2088">
-                    </div>
-                    
-                    <div class="form-group">
-                        <label for="longitude">Longitude</label>
-                        <input type="number" id="longitude" step="0.0001" value="106.8456">
-                    </div>
-                </div>
-                
-                <div class="form-group">
-                    <label for="distance">Network Size (meters)</label>
-                    <input type="range" id="distance" min="200" max="1000" step="100" value="500">
-                    <span id="distance-value">500 meters</span>
-                </div>
-                
-                <button id="load-network-btn">Load Network</button>
-                <button id="reset-network-btn" disabled>Reset Network</button>
-            </div>
-            
-            <div id="map"></div>
-        </div>
-    </div>
-    
-    <!-- Leaflet JS -->
-    <script src="https://unpkg.com/leaflet@1.9.3/dist/leaflet.js"></script>
-    
-    <script>
-        // Basic JavaScript to initialize the map
-        let map = L.map('map').setView([-6.2088, 106.8456], 15);
-        
-        // Add the base map tiles
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-            maxZoom: 19
-        }).addTo(map);
-        
-        // Initialize variables
-        let networkLayer = null;
-        const loadNetworkBtn = document.getElementById('load-network-btn');
-        const resetNetworkBtn = document.getElementById('reset-network-btn');
-        
-        // Add event listeners for your buttons
-        loadNetworkBtn.addEventListener('click', loadNetwork);
-        resetNetworkBtn.addEventListener('click', resetNetwork);
-        
-        // Implement loadNetwork function
-        function loadNetwork() {
-            // Get user inputs
-            const lat = parseFloat(document.getElementById('latitude').value);
-            const lng = parseFloat(document.getElementById('longitude').value);
-            const dist = parseInt(document.getElementById('distance').value);
-            
-            // Make API request to your Flask backend
-            fetch('/load_network', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    latitude: lat,
-                    longitude: lng,
-                    distance: dist
-                })
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.success) {
-                    // Display the network on the map
-                    displayNetwork(data.network);
-                    resetNetworkBtn.disabled = false;
-                } else {
-                    alert('Error: ' + data.error);
-                }
-            });
-        }
-        
-        // Add more JavaScript functions for handling the network display and interaction
-        
-        // Example: Display network function
-        function displayNetwork(networkData) {
-            // Remove existing network
-            if (networkLayer) {
-                map.removeLayer(networkLayer);
-            }
-            
-            // Create a new layer with the network data
-            networkLayer = L.geoJSON(networkData, {
-                style: function(feature) {
-                    if (feature.geometry.type === 'LineString') {
-                        // Color based on traffic
-                        const traffic = feature.properties.traffic;
-                        let color = '#4daf4a';  // Green for low traffic
-                        
-                        if (traffic > 500) {
-                            color = '#e41a1c';  // Red for high traffic
-                        } else if (traffic > 200) {
-                            color = '#ff7f00';  // Orange for medium traffic
-                        }
-                        
-                        return {
-                            color: color,
-                            weight: feature.properties.width || 3,
-                            opacity: 0.8
-                        };
-                    }
-                },
-                onEachFeature: function(feature, layer) {
-                    // Add click handler for road segments
-                    if (feature.geometry.type === 'LineString') {
-                        layer.on('click', function() {
-                            // Implement road closure functionality
-                            if (confirm('Close this road segment?')) {
-                                closeRoad(feature.properties);
-                            }
-                        });
-                        
-                        // Add tooltip with road info
-                        layer.bindTooltip(`${feature.properties.name}<br>Traffic: ${feature.properties.traffic}`);
-                    }
-                }
-            }).addTo(map);
-            
-            // Fit map to network bounds
-            if (networkLayer.getBounds().isValid()) {
-                map.fitBounds(networkLayer.getBounds());
-            }
-        }
-        
-        // Implement the resetNetwork and closeRoad functions
-    </script>
-</body>
-</html>
-```
+### 1. Basic HTML Structure
 
-## Step 6: Implementing Road Closure and Traffic Redistribution
+- Set up the document structure
+- Include Leaflet.js library and CSS
+- Create a layout with a header, sidebar and map container
 
-Add these routes and functions to `app.py`:
+### 2. CSS Styling
 
-```python
-@app.route('/close_road', methods=['POST'])
-def close_road():
-    """Simulate closing a road segment and recalculate traffic"""
-    global G, G_modified, edge_traffic
-    
-    if G is None:
-        return jsonify({'success': False, 'error': 'No network loaded'})
-    
-    data = request.json
-    u = data.get('node_from')
-    v = data.get('node_to')
-    k = int(data.get('key', 0))
-    
-    try:
-        # Create a new modified graph
-        G_modified = G.copy()
-        
-        # Remove the selected edge
-        if G_modified.has_edge(u, v):
-            G_modified.remove_edge(u, v)
-        
-        # Recalculate traffic
-        edge_traffic = redistribute_traffic(G, G_modified, edge_traffic, (u, v, k))
-        
-        # Create GeoJSON representation of modified network
-        network_geojson = create_network_geojson(G_modified, edge_traffic)
-        
-        return jsonify({
-            'success': True,
-            'network': network_geojson
-        })
-    except Exception as e:
-        print(f"Error closing road: {e}")
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        })
+- Style the layout (flex container for sidebar and map)
+- Style form controls and buttons
+- Add responsive design elements
 
-@app.route('/reset_network', methods=['POST'])
-def reset_network():
-    """Reset to the original network without closures"""
-    global G, G_modified, edge_traffic
-    
-    if G is None:
-        return jsonify({'success': False, 'error': 'No network loaded'})
-    
-    # Reset modified graph to original
-    G_modified = G.copy()
-    
-    # Reset traffic to original values
-    edge_traffic = generate_traffic(G)
-    
-    # Create GeoJSON with the original network
-    network_geojson = create_network_geojson(G, edge_traffic)
-    
-    return jsonify({
-        'success': True,
-        'network': network_geojson
-    })
+### 3. Map Setup
 
-def redistribute_traffic(original_graph, modified_graph, original_traffic, closed_edge):
-    """
-    Redistribute traffic after a road closure using a simple algorithm:
-    - For the closed edge, find alternative paths between its endpoints
-    - Distribute the traffic from the closed edge along these paths
-    """
-    u, v, k = closed_edge
-    closed_traffic = original_traffic.get((u, v, k), 0)
-    
-    # Copy the original traffic
-    new_traffic = original_traffic.copy()
-    
-    # Remove the closed edge's traffic
-    new_traffic.pop((u, v, k), None)
-    
-    # Only redistribute if there was traffic on the closed edge
-    if closed_traffic > 0:
-        try:
-            # Find shortest path between the endpoints in the modified graph
-            path = nx.shortest_path(modified_graph, u, v, weight='length')
-            
-            # Distribute traffic along this path
-            for i in range(len(path)-1):
-                from_node = path[i]
-                to_node = path[i+1]
-                
-                # Use key 0 for all edges in our simplified model
-                edge = (from_node, to_node, 0)
-                
-                # Add traffic to this edge
-                new_traffic[edge] = new_traffic.get(edge, 0) + closed_traffic
-        except nx.NetworkXNoPath:
-            # If no path exists, we cannot redistribute the traffic
-            print(f"No alternative path found between {u} and {v}")
-            pass
-    
-    return new_traffic
-```
-
-## Step 7: Completing the Frontend JavaScript
-
-Add these JavaScript functions to your HTML file:
+Initialize a Leaflet map with basic settings:
 
 ```javascript
-// Function to close a road
-function closeRoad(edge) {
-    fetch('/close_road', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-            node_from: edge.u,
-            node_to: edge.v,
-            key: edge.key
-        })
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.success) {
-            displayNetwork(data.network);
-        } else {
-            alert('Error: ' + data.error);
-        }
-    });
-}
+// Initialize map centered on default location
+let map = L.map('map').setView([-6.2088, 106.8456], 15);
 
-// Function to reset the network
-function resetNetwork() {
-    fetch('/reset_network', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({})
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.success) {
-            displayNetwork(data.network);
-        } else {
-            alert('Error: ' + data.error);
-        }
-    });
-}
-
-// Add event listener for location presets
-document.getElementById('location-preset').addEventListener('change', function() {
-    const locations = {
-        jakarta: { lat: -6.2088, lng: 106.8456 },
-        newyork: { lat: 40.7128, lng: -74.0060 },
-        london: { lat: 51.5074, lng: -0.1278 }
-    };
-    
-    if (this.value !== 'custom' && locations[this.value]) {
-        document.getElementById('latitude').value = locations[this.value].lat;
-        document.getElementById('longitude').value = locations[this.value].lng;
-    }
-});
-
-// Update distance display when slider changes
-document.getElementById('distance').addEventListener('input', function() {
-    document.getElementById('distance-value').textContent = `${this.value} meters`;
-});
+// Add OpenStreetMap tiles
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+    maxZoom: 19
+}).addTo(map);
 ```
 
-## Step 8: Run Your Application
+### 4. User Interface Controls
 
-```bash
-python app.py
+Create controls for:
+- Location selection (preset cities or custom coordinates)
+- Network size adjustment (slider for distance)
+- Action buttons (load network, reset network)
+
+### 5. JavaScript Functions
+
+Implement these core JavaScript functions:
+
+1. **loadNetwork()**:
+   - Gather user inputs (location, size)
+   - Send a fetch request to your backend
+   - Process the response and display the network
+
+2. **displayNetwork()**:
+   - Take GeoJSON data and display it on the map
+   - Style roads based on traffic (color, width)
+   - Add click handlers for road selection
+   - Add tooltips with road information
+
+3. **closeRoad()**:
+   - Send selected road data to your backend
+   - Update the display with the modified network
+
+4. **resetNetwork()**:
+   - Request the original network from your backend
+   - Restore the display to its initial state
+
+For styling, consider a color scheme for traffic levels:
+```javascript
+// Example traffic color coding
+function getTrafficColor(traffic) {
+    if (traffic < 200) return '#4daf4a';      // Green for low traffic
+    else if (traffic < 500) return '#ff7f00';  // Orange for medium traffic
+    else return '#e41a1c';                     // Red for high traffic
+}
 ```
 
-Open your browser and navigate to `http://localhost:5001`
+## Step 6: Running and Testing
+
+1. **Start your application**:
+   ```bash
+   python app.py
+   ```
+
+2. **Open in browser**:
+   ```
+   http://localhost:5001
+   ```
+
+3. **Test the key workflows**:
+   - Load networks for different locations
+   - Try different network sizes
+   - Close roads and observe traffic redistribution
+   - Reset the network to original state
 
 ## Common Issues and Solutions
 

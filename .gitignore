@@ -33,3 +33,6 @@ Thumbs.db
 # Application specific
 *.log
 screenshot.png
+
+# Misc
+PROJECT-INSTRUCTIONS.md
